@@ -4,9 +4,6 @@ import time
 import math
 import threading
 
-# Suppress warnings
-GPIO.setwarnings(False)
-
 # TCP Server setup
 HOST = '0.0.0.0'
 PORT = 65433
@@ -19,6 +16,11 @@ ENCODER_B_PIN = 27
 ENCODER_Z_PIN = 4
 ppr = 640
 encoderPos = 0
+last_time = time.time()
+last_encoderPos = 0
+
+# Suppress warnings
+GPIO.setwarnings(False)
 
 # GPIO setup
 GPIO.setmode(GPIO.BCM)
@@ -48,9 +50,7 @@ def doEncoderZ(channel):
     global encoderPos
     encoderPos = 0
 
-# Add a small delay before setting up the event detection
-time.sleep(1)
-
+# Add event detection
 try:
     GPIO.add_event_detect(ENCODER_A_PIN, GPIO.BOTH, callback=doEncoderA)
     GPIO.add_event_detect(ENCODER_B_PIN, GPIO.BOTH, callback=doEncoderB)
@@ -69,9 +69,7 @@ def run_motor(direction, duration, speed):
 
 # Function to send encoder data
 def send_encoder_data(conn):
-    global encoderPos
-    last_time = time.time()
-    last_encoderPos = encoderPos
+    global encoderPos, last_time, last_encoderPos
 
     while True:
         current_time = time.time()
@@ -114,23 +112,54 @@ def handle_client(conn):
         encoder_thread.join()
 
 # TCP Server loop
-with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    s.bind((HOST, PORT))
-    s.listen()
-    print('Motor Server is ready for connections')
+def start_server():
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        s.bind((HOST, PORT))
+        s.listen()
+        print('Motor Server is ready for connections')
 
+        while True:
+            try:
+                conn, addr = s.accept()
+                print(f'Connected by {addr}')
+                client_thread = threading.Thread(target=handle_client, args=(conn,))
+                client_thread.start()
+            except KeyboardInterrupt:
+                print('Motor Server shutdown')
+                break
+
+# Function to print the angle and angular velocity continuously
+def print_values():
+    global encoderPos, last_time, last_encoderPos
     while True:
-        try:
-            conn, addr = s.accept()
-            print(f'Connected by {addr}')
-            client_thread = threading.Thread(target=handle_client, args=(conn,))
-            client_thread.start()
-        except KeyboardInterrupt:
-            print('Motor Server shutdown')
-            break
+        current_time = time.time()
+        time_interval = current_time - last_time
+        encoder_delta = encoderPos - last_encoderPos
+        angle = (encoderPos / float(ppr * 4)) * 2 * math.pi
+        angle_delta = (encoder_delta / float(ppr * 4)) * 2 * math.pi
+        average_angular_velocity = angle_delta / time_interval if time_interval > 0 else 0
 
-# Ensure GPIO cleanup
-pwm.stop()
-GPIO.cleanup()
-print('Motor and Encoder server shutdown')
+        print("\rAngle: {:.2f} rad, Angular Velocity: {:.2f} rad/s".format(angle, average_angular_velocity), end="")
+        time.sleep(0.1)  # Adjust the sleep time as needed
+
+# Start the server in a separate thread
+server_thread = threading.Thread(target=start_server)
+server_thread.start()
+
+# Start the print_values function in a separate thread
+print_thread = threading.Thread(target=print_values)
+print_thread.start()
+
+# Main program loop
+try:
+    while True:
+        time.sleep(1)
+except KeyboardInterrupt:
+    print("Program stopped by user")
+finally:
+    GPIO.cleanup()
+    server_thread.join()
+    print_thread.join()
+
+print("Motor and Encoder server shutdown")
