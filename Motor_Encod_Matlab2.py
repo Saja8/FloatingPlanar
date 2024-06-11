@@ -4,6 +4,9 @@ import time
 import math
 import threading
 
+# Suppress warnings
+GPIO.setwarnings(False)
+
 # TCP Server setup
 HOST = '0.0.0.0'
 PORT = 65433
@@ -44,6 +47,9 @@ def doEncoderB(channel):
 def doEncoderZ(channel):
     global encoderPos
     encoderPos = 0
+
+# Add a small delay before setting up the event detection
+time.sleep(1)
 
 try:
     GPIO.add_event_detect(ENCODER_A_PIN, GPIO.BOTH, callback=doEncoderA)
